@@ -949,6 +949,10 @@ void WallpaperApplication::render () {
 
     this->takeScreenshot (this->m_context.settings.screenshot.path);
     this->m_screenShotTaken = true;
+
+    if (this->m_context.settings.screenshot.exit) {
+	this->m_context.state.general.keepRunning = false;
+    }
 }
 
 void WallpaperApplication::cleanup () {

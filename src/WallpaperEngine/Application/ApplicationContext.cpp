@@ -553,6 +553,10 @@ void ApplicationContext::loadSettingsFromArgv () {
 	.default_value<uint32_t> (5)
 	.store_into (this->settings.screenshot.delay);
 
+    screenshotGroup.add_argument ("--screenshot-exit")
+	.help ("Exit once the screenshot has been written instead of continuing to render")
+	.store_into (this->settings.screenshot.exit);
+
     auto& contentGroup = program.add_group ("Content options");
 
     contentGroup.add_argument ("--assets-dir")
@@ -661,6 +665,10 @@ void ApplicationContext::loadSettingsFromArgv () {
 
 	if (this->settings.general.defaultBackground.empty ()) {
 	    throw std::runtime_error ("At least one background ID must be specified");
+	}
+
+	if (this->settings.screenshot.exit && !this->settings.screenshot.take) {
+	    throw std::runtime_error ("--screenshot-exit requires --screenshot");
 	}
 
 	this->settings.audio.volume = std::max (0, std::min (this->settings.audio.volume, 128));

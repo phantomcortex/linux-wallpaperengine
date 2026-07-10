@@ -178,6 +178,8 @@ public:
 	struct {
 	    /** If an screenshot should be taken */
 	    bool take;
+	    /** If the application should exit once the screenshot has been written */
+	    bool exit;
 	    /** The frames to wait until the screenshot is taken */
 	    uint32_t delay;
 	    /** The path to where the screenshot must be saved */
@@ -232,6 +234,7 @@ public:
         },
         .screenshot = {
             .take = false,
+            .exit = false,
             .delay = 5,
             .path = "",
         },
