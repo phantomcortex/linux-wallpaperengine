@@ -11,6 +11,7 @@
 
 #include <GLFW/glfw3native.h>
 
+#include <cstdlib>
 #include <unistd.h>
 
 using namespace WallpaperEngine::Render::Drivers;
@@ -20,6 +21,15 @@ void CustomGLFWErrorHandler (int errorCode, const char* reason) { sLog.error ("G
 GLFWOpenGLDriver::GLFWOpenGLDriver (const char* windowTitle, ApplicationContext& context, WallpaperApplication& app) :
     VideoDriver (app, m_mouseInput), m_context (context), m_mouseInput (*this) {
     glfwSetErrorCallback (CustomGLFWErrorHandler);
+
+    // On Wayland, the compositor may hand us the display via WAYLAND_SOCKET (an fd) rather than
+    // WAYLAND_DISPLAY. GLFW only forces the Wayland backend when XDG_SESSION_TYPE and
+    // WAYLAND_DISPLAY agree, so under a socket handover its autodetection can fall through to X11.
+    // Pin the platform explicitly when a Wayland environment is present and GLFW supports it.
+    if ((getenv ("WAYLAND_SOCKET") != nullptr || getenv ("WAYLAND_DISPLAY") != nullptr)
+	&& glfwPlatformSupported (GLFW_PLATFORM_WAYLAND) == GLFW_TRUE) {
+	glfwInitHint (GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
+    }
 
     // initialize glfw
     if (glfwInit () == GLFW_FALSE) {
@@ -35,6 +45,8 @@ GLFWOpenGLDriver::GLFWOpenGLDriver (const char* windowTitle, ApplicationContext&
     // set X11-specific hints
     glfwWindowHintString (GLFW_X11_CLASS_NAME, "linux-wallpaperengine");
     glfwWindowHintString (GLFW_X11_INSTANCE_NAME, "linux-wallpaperengine");
+    // set the Wayland analogue so compositors and our GNOME Shell extension can match the surface
+    glfwWindowHintString (GLFW_WAYLAND_APP_ID, "linux-wallpaperengine");
 
     // for forced window mode, we can set some hints that'll help position the window
     if (context.settings.render.mode == Application::ApplicationContext::EXPLICIT_WINDOW) {
@@ -89,7 +101,11 @@ bool GLFWOpenGLDriver::closeRequested () { return glfwWindowShouldClose (this->m
 void GLFWOpenGLDriver::resizeWindow (glm::ivec2 size) { glfwSetWindowSize (this->m_window, size.x, size.y); }
 
 void GLFWOpenGLDriver::resizeWindow (glm::ivec4 sizeandpos) {
-    glfwSetWindowPos (this->m_window, sizeandpos.x, sizeandpos.y);
+    // glfwSetWindowPos is unsupported on Wayland (GLFW reports GLFW_FEATURE_UNAVAILABLE); the
+    // compositor owns surface placement. Only apply the position where the platform honours it.
+    if (glfwGetPlatform () != GLFW_PLATFORM_WAYLAND) {
+	glfwSetWindowPos (this->m_window, sizeandpos.x, sizeandpos.y);
+    }
     glfwSetWindowSize (this->m_window, sizeandpos.z, sizeandpos.w);
 }
 
