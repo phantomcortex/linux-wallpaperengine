@@ -2,7 +2,9 @@
 #include "WallpaperEngine/Logging/Log.h"
 #include "WallpaperEngine/Render/Wallpapers/CScene.h"
 #include "WallpaperEngine/Render/Wallpapers/CVideo.h"
+#ifdef ENABLE_WEB
 #include "WallpaperEngine/Render/Wallpapers/CWeb.h"
+#endif
 
 #include "WallpaperEngine/Data/Model/Project.h"
 #include "WallpaperEngine/Data/Model/Wallpaper.h"
@@ -340,7 +342,7 @@ std::shared_ptr<const CFBO> CWallpaper::getFBO () const { return this->m_sceneFB
 
 std::unique_ptr<CWallpaper> CWallpaper::fromWallpaper (
     const Wallpaper& wallpaper, RenderContext& context, AudioContext& audioContext,
-    WebBrowser::WebBrowserContext* browserContext, const WallpaperState::TextureUVsScaling& scalingMode,
+    [[maybe_unused]] WebBrowser::WebBrowserContext* browserContext, const WallpaperState::TextureUVsScaling& scalingMode,
     const uint32_t& clampMode
 ) {
     if (wallpaper.is<Scene> ()) {
@@ -356,9 +358,13 @@ std::unique_ptr<CWallpaper> CWallpaper::fromWallpaper (
     }
 
     if (wallpaper.is<Web> ()) {
+#ifdef ENABLE_WEB
 	return std::make_unique<WallpaperEngine::Render::Wallpapers::CWeb> (
 	    wallpaper, context, audioContext, *browserContext, scalingMode, clampMode
 	);
+#else
+	sLog.exception ("This is a web wallpaper, but web support was disabled at build time (ENABLE_WEB=OFF)");
+#endif
     }
 
     sLog.exception ("Unsupported wallpaper type");

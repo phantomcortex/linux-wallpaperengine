@@ -319,7 +319,8 @@ void WallpaperApplication::initializePlaylists () {
     }
 }
 
-void WallpaperApplication::ensureBrowserForProject (const Project& project) {
+void WallpaperApplication::ensureBrowserForProject ([[maybe_unused]] const Project& project) {
+#ifdef ENABLE_WEB
     if (!project.wallpaper->is<Web> ()) {
 	return;
     }
@@ -327,6 +328,7 @@ void WallpaperApplication::ensureBrowserForProject (const Project& project) {
     if (!this->m_browserContext) {
 	this->m_browserContext = std::make_unique<WebBrowser::WebBrowserContext> (*this);
     }
+#endif
 }
 
 bool WallpaperApplication::makeAnyViewportCurrent () const {
@@ -451,7 +453,7 @@ void WallpaperApplication::advancePlaylist (
 		screen,
 		WallpaperEngine::Render::CWallpaper::fromWallpaper (
 		    *this->m_backgrounds[screen]->wallpaper, *this->m_renderContext, *this->m_audioContext,
-		    this->m_browserContext.get (), scaling, clamp
+		    this->browserContext (), scaling, clamp
 		)
 	    );
 	}
@@ -524,6 +526,7 @@ void WallpaperApplication::setupProperties () {
 }
 
 void WallpaperApplication::setupBrowser () {
+#ifdef ENABLE_WEB
     bool anyWebProject = std::any_of (
 	this->m_backgrounds.begin (), this->m_backgrounds.end (),
 	[] (const std::pair<const std::string, ProjectUniquePtr>& pair) -> bool {
@@ -537,6 +540,7 @@ void WallpaperApplication::setupBrowser () {
     }
 
     this->m_browserContext = std::make_unique<WebBrowser::WebBrowserContext> (*this);
+#endif
 }
 
 void WallpaperApplication::takeScreenshot (const std::filesystem::path& filename) const {
@@ -751,7 +755,7 @@ void WallpaperApplication::prepareOutputs () {
 	m_renderContext->setWallpaper (
 	    background,
 	    WallpaperEngine::Render::CWallpaper::fromWallpaper (
-		*info->wallpaper, *m_renderContext, *m_audioContext, m_browserContext.get (), scaling, clamp
+		*info->wallpaper, *m_renderContext, *m_audioContext, browserContext (), scaling, clamp
 	    )
 	);
     }
@@ -809,7 +813,7 @@ void WallpaperApplication::prepareOutputs () {
 
 	// Create one shared wallpaper with the span group's scaling mode
 	auto sharedWallpaper = WallpaperEngine::Render::CWallpaper::fromWallpaper (
-	    *bgIt->second->wallpaper, *m_renderContext, *m_audioContext, m_browserContext.get (), spanGroup.scaling,
+	    *bgIt->second->wallpaper, *m_renderContext, *m_audioContext, browserContext (), spanGroup.scaling,
 	    spanGroup.clamp
 	);
 
