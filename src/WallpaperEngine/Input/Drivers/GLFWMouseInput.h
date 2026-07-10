@@ -26,6 +26,8 @@ public:
      */
     [[nodiscard]] glm::dvec2 position () const override;
 
+    void setPositionOverride (std::optional<glm::dvec2> position) override;
+
     /**
      * @return The status of the mouse's left click
      */
@@ -44,6 +46,8 @@ private:
      */
     glm::dvec2 m_mousePosition = {};
     glm::dvec2 m_reportedPosition = {};
+    /** When set, overrides the device position (control-interface pointer forwarding) */
+    std::optional<glm::dvec2> m_positionOverride = std::nullopt;
     MouseClickStatus m_leftClick = Released;
     MouseClickStatus m_rightClick = Released;
 };

@@ -8,6 +8,13 @@ using namespace WallpaperEngine::Input::Drivers;
 GLFWMouseInput::GLFWMouseInput (const Render::Drivers::GLFWOpenGLDriver& driver) : m_driver (driver) { }
 
 void GLFWMouseInput::update () {
+    // an externally forwarded position (e.g. over the control interface) wins over the device,
+    // which for a reparented background window never reports real pointer motion anyway
+    if (this->m_positionOverride.has_value ()) {
+	this->m_reportedPosition = *this->m_positionOverride;
+	return;
+    }
+
     if (!this->m_driver.getApp ().getContext ().settings.mouse.enabled) {
 	this->m_reportedPosition = { 0, 0 };
 	return;
@@ -31,6 +38,10 @@ void GLFWMouseInput::update () {
 }
 
 glm::dvec2 GLFWMouseInput::position () const { return this->m_reportedPosition; }
+
+void GLFWMouseInput::setPositionOverride (std::optional<glm::dvec2> position) {
+    this->m_positionOverride = position;
+}
 
 WallpaperEngine::Input::MouseClickStatus GLFWMouseInput::leftClick () const { return m_leftClick; }
 

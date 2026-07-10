@@ -17,6 +17,7 @@ public:
     void update ();
 
     [[nodiscard]] const MouseInput& getMouseInput () const;
+    [[nodiscard]] MouseInput& getMouseInput ();
 
 private:
     MouseInput& m_mouse;

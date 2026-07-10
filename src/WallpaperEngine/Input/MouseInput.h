@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/vec2.hpp>
+#include <optional>
 
 namespace WallpaperEngine::Input {
 enum MouseClickStatus : int { Released = 0, Clicked = 1 };
@@ -29,6 +30,14 @@ public:
      * The virtual pointer's position
      */
     [[nodiscard]] virtual glm::dvec2 position () const = 0;
+
+    /**
+     * Overrides the pointer position with an externally supplied value in the engine's OpenGL
+     * pixel space (same space as position()), e.g. forwarded over the control interface for a
+     * background window that receives no real pointer events. Pass std::nullopt to clear the
+     * override and resume reading the real device. Default: no-op.
+     */
+    virtual void setPositionOverride (std::optional<glm::dvec2> position) {}
 
     /**
      * @return The status of the mouse's left click

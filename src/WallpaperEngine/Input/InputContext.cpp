@@ -8,3 +8,5 @@ InputContext::InputContext (MouseInput& mouseInput) : m_mouse (mouseInput) { }
 void InputContext::update () { this->m_mouse.update (); }
 
 const MouseInput& InputContext::getMouseInput () const { return this->m_mouse; }
+
+MouseInput& InputContext::getMouseInput () { return this->m_mouse; }
