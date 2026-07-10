@@ -10,6 +10,8 @@ class ApplicationState {
 public:
     struct {
 	bool keepRunning;
+	/** Explicit user/control-interface pause, independent of the fullscreen-driven pause */
+	bool paused;
     } general {};
 
     struct {

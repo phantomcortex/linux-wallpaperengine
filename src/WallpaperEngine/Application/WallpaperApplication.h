@@ -22,6 +22,11 @@
 namespace WallpaperEngine::WebBrowser { class WebBrowserContext; }
 #endif
 
+#include "WallpaperEngine/Control/ControlTarget.h"
+#ifdef ENABLE_CONTROL_DBUS
+#include "WallpaperEngine/Control/ControlServer.h"
+#endif
+
 #include "WallpaperEngine/Data/Model/Types.h"
 #include "WallpaperEngine/Media/MediaSource.h"
 
@@ -34,7 +39,7 @@ using namespace WallpaperEngine::Data::Model;
 /**
  * Small wrapper class over the actual wallpaper's main application skeleton
  */
-class WallpaperApplication {
+class WallpaperApplication : public WallpaperEngine::Control::ControlTarget {
 public:
     explicit WallpaperApplication (ApplicationContext& context);
 
@@ -85,6 +90,19 @@ public:
      * Gets the currently set destination framebuffer for rendering. If not set, returns 0 (the default framebuffer).
      */
     [[nodiscard]] GLuint getDestinationFramebuffer () const;
+
+    // ControlTarget: runtime actions driven by the control interface (see Control/ControlTarget.h)
+    void pause () override;
+    void resume () override;
+    void stop () override;
+    void setVolume (uint32_t volume) override;
+    void setMuted (bool muted) override;
+    void loadWallpaper (const std::string& idOrPath) override;
+    void setProperty (const std::string& key, const std::string& value) override;
+    void setMousePosition (double x, double y) override;
+    [[nodiscard]] WallpaperEngine::Control::PlaybackState state () const override;
+    [[nodiscard]] std::string wallpaper () const override;
+    [[nodiscard]] uint32_t fps () const override;
 
 private:
     /**
@@ -191,6 +209,18 @@ private:
 #endif
     }
     std::unique_ptr<WallpaperEngine::Media::MediaSource> m_mediaSource = nullptr;
+#ifdef ENABLE_CONTROL_DBUS
+    std::unique_ptr<WallpaperEngine::Control::ControlServer> m_controlServer = nullptr;
+#endif
+    /** Control-interface audio state; combined into the live state.audio.volume the callback reads */
+    int m_desiredVolume = 0;
+    bool m_muted = false;
+    /** Identifier of the wallpaper currently loaded on this renderer's output */
+    std::string m_currentWallpaper {};
+    /** Rolling FPS measurement exposed over the control interface */
+    uint32_t m_measuredFps = 0;
+    uint32_t m_fpsFrameRef = 0;
+    std::chrono::steady_clock::time_point m_fpsTimeRef {};
     std::mt19937 m_playlistRng { std::random_device {}() };
     bool m_isPaused = false;
     bool m_screenShotTaken = false;

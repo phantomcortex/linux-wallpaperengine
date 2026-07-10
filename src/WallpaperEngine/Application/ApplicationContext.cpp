@@ -498,6 +498,13 @@ void ApplicationContext::loadSettingsFromArgv () {
 	.default_value (4)
 	.store_into (this->settings.render.msaaSamples);
 
+#ifdef ENABLE_CONTROL_DBUS
+    performanceGroup.add_argument ("--control-fd")
+	.help ("fd of a pre-connected socket for the private control interface (used by the launcher)")
+	.default_value (-1)
+	.store_into (this->settings.control.fd);
+#endif
+
     performanceGroup.add_argument ("--no-fullscreen-pause")
 	.help ("Prevents the background pausing when an app is fullscreen")
 	.flag ()

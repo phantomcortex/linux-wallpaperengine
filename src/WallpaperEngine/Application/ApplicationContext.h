@@ -151,6 +151,14 @@ public:
 	} render;
 
 	/**
+	 * Control interface settings
+	 */
+	struct {
+	    /** fd of a pre-connected socket for the private control interface; -1 disables it */
+	    int fd;
+	} control;
+
+	/**
 	 * Audio settings
 	 */
 	struct {
@@ -224,6 +232,9 @@ public:
             .wayland = {
                 .layer = WAYLAND_LAYER_BOTTOM,
             },
+        },
+        .control = {
+            .fd = -1,
         },
         .audio = {
             .enabled = true,

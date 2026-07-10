@@ -27,6 +27,11 @@ endif()
 # wallpapers (e.g. the GNOME Shell live background) can opt out entirely.
 option(ENABLE_WEB "Build web wallpaper support via the Chromium Embedded Framework (CEF)" ON)
 
+# Runtime control interface over a private, peer-to-peer D-Bus connection (uses GLib/GIO). Lets a
+# launcher pause/resume, change volume, swap the wallpaper, etc. Gate it so upstream builds
+# without GLib can opt out.
+option(ENABLE_CONTROL_DBUS "Build the runtime control interface over a private D-Bus connection" ON)
+
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
 
 find_package(X11)
@@ -42,6 +47,11 @@ find_package(LZ4 REQUIRED)
 find_package(FFMPEG REQUIRED)
 find_package(PulseAudio REQUIRED)
 find_package(Freetype REQUIRED)
+
+if(ENABLE_CONTROL_DBUS)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GIO REQUIRED gio-2.0 gobject-2.0 glib-2.0)
+endif()
 
 set(ENABLE_OPT OFF)
 set(SPIRV_CROSS_FORCE_PIC ON)
@@ -567,12 +577,21 @@ if(ENABLE_WEB)
     set(WEB_LINK_LIBRARIES libcef_lib libcef_dll_wrapper)
 endif()
 
+# Control-interface sources depend on GLib/GIO; only compiled when ENABLE_CONTROL_DBUS is set.
+if(ENABLE_CONTROL_DBUS)
+    set(CONTROL_SOURCES
+        src/WallpaperEngine/Control/ControlTarget.h
+        src/WallpaperEngine/Control/ControlServer.h
+        src/WallpaperEngine/Control/ControlServer.cpp)
+endif()
+
 if(BUILD_TESTING)
     add_executable(
         tests
 
         ${COMMON_SOURCES}
         ${WEB_SOURCES}
+        ${CONTROL_SOURCES}
 
         src/WallpaperEngine/Testing/Cases/Example.cpp
         src/WallpaperEngine/Testing/Render/TestingOpenGLDriver.cpp
@@ -590,6 +609,7 @@ add_library(
 
     ${COMMON_SOURCES}
     ${WEB_SOURCES}
+    ${CONTROL_SOURCES}
     ${WAYLAND_SOURCES}
     ${X11_SOURCES}
     ${DEMOMODE_SOURCES})
@@ -656,6 +676,17 @@ if(ENABLE_WEB)
     target_compile_definitions(linux-wallpaperengine-lib PUBLIC ENABLE_WEB)
     if(BUILD_TESTING)
         target_compile_definitions(tests PRIVATE ENABLE_WEB)
+    endif()
+endif()
+
+if(ENABLE_CONTROL_DBUS)
+    target_include_directories(linux-wallpaperengine-lib PUBLIC ${GIO_INCLUDE_DIRS})
+    target_link_libraries(linux-wallpaperengine-lib PUBLIC ${GIO_LIBRARIES})
+    target_compile_definitions(linux-wallpaperengine-lib PUBLIC ENABLE_CONTROL_DBUS)
+    if(BUILD_TESTING)
+        target_include_directories(tests PRIVATE ${GIO_INCLUDE_DIRS})
+        target_link_libraries(tests PRIVATE ${GIO_LIBRARIES})
+        target_compile_definitions(tests PRIVATE ENABLE_CONTROL_DBUS)
     endif()
 endif()
 

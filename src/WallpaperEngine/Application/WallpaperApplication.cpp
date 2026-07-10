@@ -68,11 +68,29 @@ WallpaperApplication::WallpaperApplication (ApplicationContext& context) : m_con
     this->setupProperties ();
     this->setupBrowser ();
     this->initializePlaylists ();
+
+    // seed the reported wallpaper id from the initial background
+    this->m_currentWallpaper = this->m_context.settings.general.defaultBackground.string ();
+    if (this->m_currentWallpaper.empty () && !this->m_context.settings.general.screenBackgrounds.empty ()) {
+	this->m_currentWallpaper = this->m_context.settings.general.screenBackgrounds.begin ()->second.string ();
+    }
 }
 
 void WallpaperApplication::initializeSubsystems () {
     // initialize player dbus (update every 2 seconds)
     m_mediaSource = std::make_unique<WallpaperEngine::Media::DBusMediaSource> (std::chrono::milliseconds (2000));
+
+    // seed control-interface state from the initial settings
+    this->m_desiredVolume = this->m_context.state.audio.volume;
+    this->m_fpsTimeRef = std::chrono::steady_clock::now ();
+
+#ifdef ENABLE_CONTROL_DBUS
+    if (this->m_context.settings.control.fd >= 0) {
+	this->m_controlServer = std::make_unique<WallpaperEngine::Control::ControlServer> (
+	    this->m_context.settings.control.fd, *this
+	);
+    }
+#endif
 }
 
 AssetLocatorUniquePtr WallpaperApplication::setupAssetLocator (const std::string& bg) const {
@@ -869,9 +887,29 @@ void WallpaperApplication::render () {
     static time_t seconds;
     static struct tm* timeinfo;
 
+#ifdef ENABLE_CONTROL_DBUS
+    // service the control interface every frame, before the pause early-return below, so a
+    // Resume can be received while the wallpaper is paused
+    if (this->m_controlServer) {
+	this->m_controlServer->iterate ();
+	this->m_controlServer->publishState ();
+    }
+#endif
+
+    // rolling fps measurement exposed over the control interface
+    const auto fpsNow = std::chrono::steady_clock::now ();
+    const auto fpsElapsed = std::chrono::duration_cast<std::chrono::milliseconds> (fpsNow - this->m_fpsTimeRef).count ();
+    if (fpsElapsed >= 1000) {
+	const uint32_t frameCounter = this->m_videoDriver->getFrameCounter ();
+	this->m_measuredFps = static_cast<uint32_t> ((frameCounter - this->m_fpsFrameRef) * 1000 / fpsElapsed);
+	this->m_fpsFrameRef = frameCounter;
+	this->m_fpsTimeRef = fpsNow;
+    }
+
     if (this->m_isPaused) {
 	usleep (FULLSCREEN_CHECK_WAIT_TIME);
-	if (this->m_fullScreenDetector->anythingFullscreen () && this->m_context.state.general.keepRunning) {
+	if ((this->m_fullScreenDetector->anythingFullscreen () || this->m_context.state.general.paused)
+	&& this->m_context.state.general.keepRunning) {
 	    return;
 	}
 	m_renderContext->setPause (false);
@@ -941,7 +979,8 @@ void WallpaperApplication::render () {
 	}
 #endif /* DEMOMODE */
 	// check for fullscreen windows and wait until there's none fullscreen
-	if (this->m_fullScreenDetector->anythingFullscreen () && this->m_context.state.general.keepRunning) {
+	if ((this->m_fullScreenDetector->anythingFullscreen () || this->m_context.state.general.paused)
+	&& this->m_context.state.general.keepRunning) {
 	    this->m_isPaused = true;
 	    this->m_pauseStart = std::chrono::steady_clock::now ();
 
@@ -1006,6 +1045,123 @@ void WallpaperApplication::signal (int signal) {
 const std::map<std::string, ProjectUniquePtr>& WallpaperApplication::getBackgrounds () const {
     return this->m_backgrounds;
 }
+
+// --- Control interface (ControlTarget) ---------------------------------------------------------
+
+void WallpaperApplication::pause () { this->m_context.state.general.paused = true; }
+
+void WallpaperApplication::resume () { this->m_context.state.general.paused = false; }
+
+void WallpaperApplication::stop () { this->m_context.state.general.keepRunning = false; }
+
+void WallpaperApplication::setVolume (uint32_t volume) {
+    this->m_desiredVolume = static_cast<int> (std::min<uint32_t> (volume, 128));
+    this->m_context.state.audio.volume = this->m_muted ? 0 : this->m_desiredVolume;
+}
+
+void WallpaperApplication::setMuted (bool muted) {
+    this->m_muted = muted;
+    this->m_context.state.audio.enabled = !muted;
+    this->m_context.state.audio.volume = this->m_muted ? 0 : this->m_desiredVolume;
+}
+
+void WallpaperApplication::loadWallpaper (const std::string& idOrPath) {
+    if (idOrPath.empty ()) {
+	sLog.error ("LoadWallpaper: empty id/path ignored");
+	return;
+    }
+
+    if (!this->makeAnyViewportCurrent ()) {
+	sLog.error ("LoadWallpaper: no active viewport, cannot swap wallpaper");
+	return;
+    }
+
+    // swap the wallpaper on every output this renderer owns (typically one), reusing the same
+    // load + property + browser + setWallpaper sequence the playlist advance path uses
+    for (auto& entry : this->m_backgrounds) {
+	const std::string screen = entry.first;
+
+	try {
+	    auto project = this->loadBackground (idOrPath);
+
+	    this->setupPropertiesForProject (*project);
+	    this->ensureBrowserForProject (*project);
+
+	    this->m_backgrounds[screen] = std::move (project);
+
+	    const auto scalingIt = this->m_context.settings.general.screenScalings.find (screen);
+	    const auto clampIt = this->m_context.settings.general.screenClamps.find (screen);
+	    const auto scaling = scalingIt != this->m_context.settings.general.screenScalings.end ()
+		? scalingIt->second
+		: this->m_context.settings.render.window.scalingMode;
+	    const auto clamp = clampIt != this->m_context.settings.general.screenClamps.end ()
+		? clampIt->second
+		: this->m_context.settings.render.window.clamp;
+
+	    if (this->m_renderContext) {
+		this->m_renderContext->setWallpaper (
+		    screen,
+		    WallpaperEngine::Render::CWallpaper::fromWallpaper (
+			*this->m_backgrounds[screen]->wallpaper, *this->m_renderContext, *this->m_audioContext,
+			this->browserContext (), scaling, clamp
+		    )
+		);
+	    }
+	} catch (const std::exception& e) {
+	    sLog.error ("LoadWallpaper failed for ", screen, ": ", e.what ());
+	}
+    }
+
+    this->m_currentWallpaper = idOrPath;
+}
+
+void WallpaperApplication::setProperty (const std::string& key, const std::string& value) {
+    bool applied = false;
+
+    for (auto& entry : this->m_backgrounds) {
+	auto it = entry.second->properties.find (key);
+
+	if (it != entry.second->properties.end ()) {
+	    it->second->update (value, DynamicValue::UpdateSource::User);
+	    applied = true;
+	}
+    }
+
+    // remember the override so a later wallpaper reload re-applies it
+    this->m_context.settings.general.properties[key] = value;
+
+    if (!applied) {
+	sLog.error ("SetProperty: no loaded wallpaper exposes property '", key, "'");
+    }
+}
+
+void WallpaperApplication::setMousePosition (double x, double y) {
+    if (!this->m_videoDriver || !this->m_renderContext) {
+	return;
+    }
+
+    const double width = static_cast<double> (this->m_renderContext->getOutput ().getFullWidth ());
+    const double height = static_cast<double> (this->m_renderContext->getOutput ().getFullHeight ());
+
+    // normalized top-left [0,1] -> engine OpenGL pixel space (bottom-left origin)
+    const glm::dvec2 pixel = { x * width, height - (y * height) };
+
+    this->m_videoDriver->getInputContext ().getMouseInput ().setPositionOverride (pixel);
+}
+
+WallpaperEngine::Control::PlaybackState WallpaperApplication::state () const {
+    if (!this->m_context.state.general.keepRunning) {
+	return WallpaperEngine::Control::PlaybackState::Stopped;
+    }
+    if (this->m_isPaused || this->m_context.state.general.paused) {
+	return WallpaperEngine::Control::PlaybackState::Paused;
+    }
+    return WallpaperEngine::Control::PlaybackState::Playing;
+}
+
+std::string WallpaperApplication::wallpaper () const { return this->m_currentWallpaper; }
+
+uint32_t WallpaperApplication::fps () const { return this->m_measuredFps; }
 
 ApplicationContext& WallpaperApplication::getContext () const { return this->m_context; }
 
