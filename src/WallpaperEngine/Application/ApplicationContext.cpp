@@ -493,6 +493,11 @@ void ApplicationContext::loadSettingsFromArgv () {
 	.default_value (30)
 	.store_into (this->settings.render.maximumFPS);
 
+    performanceGroup.add_argument ("--msaa-samples")
+	.help ("MSAA sample count for the GL context; 0 disables multisampling (cheaper for backgrounds)")
+	.default_value (4)
+	.store_into (this->settings.render.msaaSamples);
+
     performanceGroup.add_argument ("--no-fullscreen-pause")
 	.help ("Prevents the background pausing when an app is fullscreen")
 	.flag ()

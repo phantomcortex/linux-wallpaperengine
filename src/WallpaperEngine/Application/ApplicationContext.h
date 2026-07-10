@@ -113,6 +113,8 @@ public:
 	    WINDOW_MODE mode;
 	    /** Maximum FPS */
 	    int maximumFPS;
+	    /** MSAA sample count passed to GLFW_SAMPLES; 0 disables multisampling */
+	    int msaaSamples;
 	    /** Indicates if pausing should happen when something goes fullscreen */
 	    bool pauseOnFullscreen;
 	    /**
@@ -202,6 +204,7 @@ public:
         .render = {
             .mode = NORMAL_WINDOW,
             .maximumFPS = 30,
+            .msaaSamples = 4,
             .pauseOnFullscreen = true,
             .pauseOnFullscreenOnlyWhenActive = false,
             .fullscreenPauseIgnoreAppIds = {},
