@@ -618,8 +618,17 @@ void WallpaperApplication::takeScreenshot (const std::filesystem::path& filename
     const auto extension = filename.extension ();
     const std::string extStr = extension.string ();
 
-    // Offload pixel processing and saving to a background thread to avoid hitches
-    std::thread ([captures, width, height, vflip, extStr, filename] () {
+    // A previous capture (playlist rotation) may still be writing; let it finish before
+    // we overwrite the handle, or std::thread's destructor calls std::terminate.
+    if (this->m_screenshotWriter.joinable ()) {
+	this->m_screenshotWriter.join ();
+    }
+
+    // Offload pixel processing and saving to a background thread to avoid hitches.
+    // The thread is owned rather than detached so that show() can join it before the
+    // process exits -- otherwise a caller that stops right after the capture
+    // (--screenshot-exit, or simply SIGTERM) races the writer and gets no file at all.
+    this->m_screenshotWriter = std::thread ([captures, width, height, vflip, extStr, filename] () {
 	auto* bitmap = new uint8_t[width * height * 3] { 0 };
 
 	for (const auto& capture : captures) {
@@ -660,7 +669,7 @@ void WallpaperApplication::takeScreenshot (const std::filesystem::path& filename
 	}
 
 	delete[] bitmap;
-    }).detach ();
+    });
 }
 
 void WallpaperApplication::setupOutput () {
@@ -970,6 +979,13 @@ void WallpaperApplication::show () {
     while (this->m_context.state.general.keepRunning) {
 	render ();
     }
+
+    // the screenshot is encoded and written on a worker thread; do not tear the process
+    // down underneath it
+    if (this->m_screenshotWriter.joinable ()) {
+	this->m_screenshotWriter.join ();
+    }
+
     cleanup ();
 }
 

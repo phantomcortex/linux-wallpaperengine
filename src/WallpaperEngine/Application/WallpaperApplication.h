@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <random>
+#include <thread>
 
 #include "WallpaperEngine/Application/ApplicationContext.h"
 #include "WallpaperEngine/Assets/AssetLocator.h"
@@ -182,5 +183,7 @@ private:
     uint32_t m_nextFrameScreenshot = 0;
     std::chrono::steady_clock::time_point m_pauseStart {};
     GLuint m_destinationFramebuffer = 0;
+    /** Writer for the pending screenshot. Owned so it can be joined before the process exits. */
+    mutable std::thread m_screenshotWriter;
 };
 } // namespace WallpaperEngine::Application
