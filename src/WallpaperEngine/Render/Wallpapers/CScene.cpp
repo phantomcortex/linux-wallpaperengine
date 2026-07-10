@@ -39,6 +39,10 @@ CScene::CScene (
 
     // detect size if the orthogonal project is auto
     if (scene->camera.projection.isAuto) {
+	// Scene space is corner-based: objects live in [0, width] x [0, height] with y growing
+	// downwards, and CImage::updateScenePosition re-centers them onto the camera's
+	// [-width/2, width/2] box. The projection is therefore the far corner of the objects'
+	// bounding box, not twice its half-extent.
 	glm::vec2 maxExtent = { 0.0f, 0.0f };
 
 	for (const auto& object : scene->objects) {
@@ -54,13 +58,13 @@ CScene::CScene (
 	    const glm::vec3 origin = image->origin->value->getVec3 ();
 	    const glm::vec2 halfSize = image->size / 2.0f;
 
-	    maxExtent.x = glm::max (maxExtent.x, glm::abs (origin.x) + halfSize.x);
-	    maxExtent.y = glm::max (maxExtent.y, glm::abs (origin.y) + halfSize.y);
+	    maxExtent.x = glm::max (maxExtent.x, origin.x + halfSize.x);
+	    maxExtent.y = glm::max (maxExtent.y, origin.y + halfSize.y);
 	}
 
 	if (maxExtent.x > 0.0f && maxExtent.y > 0.0f) {
-	    width = maxExtent.x * 2.0f;
-	    height = maxExtent.y * 2.0f;
+	    width = maxExtent.x;
+	    height = maxExtent.y;
 	} else {
 	    width = this->getContext ().getOutput ().getFullWidth ();
 	    height = this->getContext ().getOutput ().getFullHeight ();
