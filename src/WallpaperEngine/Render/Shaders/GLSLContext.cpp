@@ -2,7 +2,28 @@
 #include "WallpaperEngine/Logging/Log.h"
 
 #include <cassert>
+#include <cstdlib>
+#include <fstream>
 #include <memory>
+
+namespace {
+// WPE_DUMP_SHADERS=<dir>: write any shader source glslang rejects to <dir> so the failure can be
+// inspected against the reported line numbers. Debug aid; does nothing when the variable is unset.
+void dumpFailedShader (const std::string& kind, const std::string& source, const std::string& infoLog) {
+    const char* dir = std::getenv ("WPE_DUMP_SHADERS");
+
+    if (dir == nullptr || *dir == '\0') {
+	return;
+    }
+
+    static int counter = 0;
+    const std::string path = std::string (dir) + "/failed-" + std::to_string (counter++) + "." + kind;
+
+    std::ofstream out (path);
+    out << "// glslang: " << infoLog << "\n" << source;
+    sLog.error ("Failing ", kind, " shader source dumped to ", path);
+}
+} // namespace
 
 #include "SPIRV/GlslangToSpv.h"
 #include "glslang/Include/ResourceLimits.h"
@@ -145,6 +166,7 @@ std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vert
 
     if (!vertexShader.parse (&BuiltInResource, 100, false, EShMsgDefault)) {
 	sLog.error ("GLSL vertex unit parsing Failed: ", vertexShader.getInfoLog ());
+	dumpFailedShader ("vert", vertex, vertexShader.getInfoLog ());
 	return { "", "" };
     }
     glslang::TShader fragmentShader (EShLangFragment);
@@ -160,6 +182,7 @@ std::pair<std::string, std::string> GLSLContext::toGlsl (const std::string& vert
 
     if (!fragmentShader.parse (&BuiltInResource, 100, false, EShMsgDefault)) {
 	sLog.error ("GLSL fragment unit parsing Failed: ", fragmentShader.getInfoLog ());
+	dumpFailedShader ("frag", fragment, fragmentShader.getInfoLog ());
 	return { "", "" };
     }
     glslang::TProgram program;
