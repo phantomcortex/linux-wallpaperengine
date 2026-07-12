@@ -325,9 +325,112 @@ void CPass::bindTextureOverrides (uint32_t currentTexture, std::shared_ptr<const
     }
 }
 
+int CPass::floatComponents (const UniformType type) {
+    switch (type) {
+	case Float:
+	    return 1;
+	case Vector2:
+	    return 2;
+	case Vector3:
+	    return 3;
+	case Vector4:
+	    return 4;
+	default:
+	    return 0;
+    }
+}
+
+void CPass::scanActiveUniforms () {
+    GLint count = 0;
+    glGetProgramiv (this->m_programID, GL_ACTIVE_UNIFORMS, &count);
+
+    for (GLint i = 0; i < count; i++) {
+	char name[256] = {0};
+	GLsizei length = 0;
+	GLint size = 0;
+	GLenum type = GL_NONE;
+
+	glGetActiveUniform (this->m_programID, i, sizeof (name) - 1, &length, &size, &type, name);
+
+	// arrays are reported as "name[0]"
+	std::string key (name, length);
+	if (const auto bracket = key.find ('['); bracket != std::string::npos) {
+	    key.resize (bracket);
+	}
+
+	switch (type) {
+	    case GL_FLOAT:
+		this->m_activeUniformTypes.emplace (key, Float);
+		break;
+	    case GL_FLOAT_VEC2:
+		this->m_activeUniformTypes.emplace (key, Vector2);
+		break;
+	    case GL_FLOAT_VEC3:
+		this->m_activeUniformTypes.emplace (key, Vector3);
+		break;
+	    case GL_FLOAT_VEC4:
+		this->m_activeUniformTypes.emplace (key, Vector4);
+		break;
+	    default:
+		// only the float family is coerced; everything else keeps the declared type
+		break;
+	}
+    }
+}
+
+CPass::UniformType CPass::resolveUploadType (const std::string& name, const UniformType declared) const {
+    // wallpapers ship shaders that declare the same uniform with different sizes per stage; GL
+    // links whichever is active, and a glUniform* of the wrong size is GL_INVALID_OPERATION (the
+    // value silently stays at its default). Trust the linked program over the text scan, but only
+    // within the float family -- counts, matrices and samplers keep their declared handling.
+    if (floatComponents (declared) == 0) {
+	return declared;
+    }
+
+    const auto it = this->m_activeUniformTypes.find (name);
+
+    if (it == this->m_activeUniformTypes.end () || floatComponents (it->second) == 0) {
+	return declared;
+    }
+
+    return it->second;
+}
+
+void CPass::uploadCoerced (const GLint id, const UniformType src, const UniformType dst, const void* value) {
+    float buffer[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    const auto* data = static_cast<const float*> (value);
+    const int available = floatComponents (src);
+
+    for (int i = 0; i < available && i < 4; i++) {
+	buffer[i] = data[i];
+    }
+
+    switch (dst) {
+	case Float:
+	    glUniform1fv (id, 1, buffer);
+	    break;
+	case Vector2:
+	    glUniform2fv (id, 1, buffer);
+	    break;
+	case Vector3:
+	    glUniform3fv (id, 1, buffer);
+	    break;
+	case Vector4:
+	    glUniform4fv (id, 1, buffer);
+	    break;
+	default:
+	    break;
+    }
+}
+
 void CPass::setupRenderReferenceUniforms () {
     // add reference uniforms
     for (const auto& value : this->m_referenceUniforms | std::views::values) {
+	if (value->uploadType != value->type) {
+	    uploadCoerced (value->id, value->type, value->uploadType, *value->value);
+	    continue;
+	}
+
 	switch (value->type) {
 	    case Double:
 		glUniform1d (value->id, *static_cast<const double*> (*value->value));
@@ -364,6 +467,11 @@ void CPass::setupRenderReferenceUniforms () {
 void CPass::setupRenderUniforms () {
     // add uniforms
     for (const auto& value : this->m_uniforms | std::views::values) {
+	if (value->uploadType != value->type && value->count == 1) {
+	    uploadCoerced (value->id, value->type, value->uploadType, value->value);
+	    continue;
+	}
+
 	switch (value->type) {
 	    case Double:
 		glUniform1dv (value->id, value->count, static_cast<const double*> (value->value));
@@ -677,6 +785,9 @@ void CPass::setupShaders () {
     glDeleteShader (vertexShaderID);
     glDeleteShader (fragmentShaderID);
 
+    // learn the real uniform types GL linked, so mismatched per-stage declarations upload correctly
+    this->scanActiveUniforms ();
+
     // first setup the default values, these will be overwritten by future values
     this->setupShaderVariables ();
     // setup uniforms
@@ -919,7 +1030,8 @@ template <typename T> void CPass::addUniform (const std::string& name, UniformTy
     T* newValue = new T (value);
 
     // uniform found, add it to the list
-    this->m_uniforms.insert_or_assign (name, new UniformEntry (id, name, type, newValue, 1));
+    this->m_uniforms.insert_or_assign (
+	name, new UniformEntry (id, name, type, newValue, 1, this->resolveUploadType (name, type)));
 }
 
 template <typename T> void CPass::addUniform (const std::string& name, UniformType type, T* value, int count) {
@@ -938,7 +1050,8 @@ template <typename T> void CPass::addUniform (const std::string& name, UniformTy
     }
 
     // uniform found, add it to the list
-    this->m_uniforms.insert_or_assign (name, new UniformEntry (id, name, type, value, count));
+    this->m_uniforms.insert_or_assign (
+	name, new UniformEntry (id, name, type, value, count, this->resolveUploadType (name, type)));
 }
 
 template <typename T> void CPass::addUniform (const std::string& name, UniformType type, T** value) {
@@ -958,7 +1071,9 @@ template <typename T> void CPass::addUniform (const std::string& name, UniformTy
 
     // uniform found, add it to the list
     this->m_referenceUniforms.insert_or_assign (
-	name, new ReferenceUniformEntry (id, name, type, reinterpret_cast<const void**> (value))
+	name,
+	new ReferenceUniformEntry (
+	    id, name, type, reinterpret_cast<const void**> (value), this->resolveUploadType (name, type))
     );
 }
 

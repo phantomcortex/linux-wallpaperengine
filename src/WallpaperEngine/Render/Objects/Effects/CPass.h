@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <glm/gtc/type_ptr.hpp>
+#include <map>
 #include <utility>
 
 #include "../../TextureProvider.h"
@@ -83,24 +84,34 @@ private:
 
     class UniformEntry {
     public:
-	UniformEntry (const GLint id, std::string name, UniformType type, const void* value, int count) :
-	    id (id), name (std::move (name)), type (type), value (value), count (count) { }
+	UniformEntry (
+	    const GLint id, std::string name, UniformType type, const void* value, int count, UniformType uploadType
+	) : id (id), name (std::move (name)), type (type), uploadType (uploadType), value (value), count (count) { }
 
 	const GLint id;
 	std::string name;
 	UniformType type;
+	// what the *linked program* expects. Wallpapers ship shaders whose stages declare the same
+	// uniform with different sizes (vec2 in one, vec4 in the other); the engine's text scan can
+	// pick the stage GL discarded, and a mismatched glUniform* call is GL_INVALID_OPERATION --
+	// the uniform silently keeps its default. When this differs from `type`, the upload path
+	// pads/truncates the float data to fit.
+	UniformType uploadType;
 	const void* value;
 	int count;
     };
 
     class ReferenceUniformEntry {
     public:
-	ReferenceUniformEntry (const GLint id, std::string name, UniformType type, const void** value) :
-	    id (id), name (std::move (name)), type (type), value (value) { }
+	ReferenceUniformEntry (
+	    const GLint id, std::string name, UniformType type, const void** value, UniformType uploadType
+	) : id (id), name (std::move (name)), type (type), uploadType (uploadType), value (value) { }
 
 	const GLint id;
 	std::string name;
 	UniformType type;
+	/** See UniformEntry::uploadType */
+	UniformType uploadType;
 	const void** value;
     };
 
@@ -154,6 +165,16 @@ private:
     template <typename T> void addUniform (const std::string& name, UniformType type, T value);
     template <typename T> void addUniform (const std::string& name, UniformType type, T* value, int count = 1);
     template <typename T> void addUniform (const std::string& name, UniformType type, T** value);
+    /** Number of floats behind a float-family UniformType, 0 for anything else */
+    static int floatComponents (UniformType type);
+    /** Cache the linked program's active uniform types (name -> UniformType) */
+    void scanActiveUniforms ();
+    /** The type glUniform* must use for `name` on the linked program; `declared` when unknown */
+    UniformType resolveUploadType (const std::string& name, UniformType declared) const;
+    /** Upload float-family data of type `src` to a uniform the program declares as `dst` */
+    static void uploadCoerced (GLint id, UniformType src, UniformType dst, const void* value);
+
+    std::map<std::string, UniformType> m_activeUniformTypes;
 
     void setupRenderFramebuffer () const;
     void setupRenderTexture ();
