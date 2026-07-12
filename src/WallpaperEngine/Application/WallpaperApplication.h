@@ -97,7 +97,7 @@ public:
     void stop () override;
     void setVolume (uint32_t volume) override;
     void setMuted (bool muted) override;
-    void loadWallpaper (const std::string& idOrPath) override;
+    bool loadWallpaper (const std::string& idOrPath) override;
     void setProperty (const std::string& key, const std::string& value) override;
     void setMousePosition (double x, double y) override;
     [[nodiscard]] WallpaperEngine::Control::PlaybackState state () const override;

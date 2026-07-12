@@ -21,7 +21,9 @@ public:
     virtual void stop () = 0;
     virtual void setVolume (uint32_t volume) = 0;
     virtual void setMuted (bool muted) = 0;
-    virtual void loadWallpaper (const std::string& idOrPath) = 0;
+    /** Swap the active wallpaper. Returns false when the new wallpaper failed to load — the
+     * previous one keeps playing, and the control layer reports the failure to the caller. */
+    virtual bool loadWallpaper (const std::string& idOrPath) = 0;
     virtual void setProperty (const std::string& key, const std::string& value) = 0;
     /** Pointer position, normalized [0,1] with a top-left origin */
     virtual void setMousePosition (double x, double y) = 0;

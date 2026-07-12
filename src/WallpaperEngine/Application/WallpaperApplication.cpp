@@ -1068,16 +1068,18 @@ void WallpaperApplication::setMuted (bool muted) {
     this->m_context.state.audio.volume = this->m_muted ? 0 : this->m_desiredVolume;
 }
 
-void WallpaperApplication::loadWallpaper (const std::string& idOrPath) {
+bool WallpaperApplication::loadWallpaper (const std::string& idOrPath) {
     if (idOrPath.empty ()) {
 	sLog.error ("LoadWallpaper: empty id/path ignored");
-	return;
+	return false;
     }
 
     if (!this->makeAnyViewportCurrent ()) {
 	sLog.error ("LoadWallpaper: no active viewport, cannot swap wallpaper");
-	return;
+	return false;
     }
+
+    bool anyFailed = false;
 
     // swap the wallpaper on every output this renderer owns (typically one), reusing the same
     // load + property + browser + setWallpaper sequence the playlist advance path uses
@@ -1090,8 +1092,6 @@ void WallpaperApplication::loadWallpaper (const std::string& idOrPath) {
 	    this->setupPropertiesForProject (*project);
 	    this->ensureBrowserForProject (*project);
 
-	    this->m_backgrounds[screen] = std::move (project);
-
 	    const auto scalingIt = this->m_context.settings.general.screenScalings.find (screen);
 	    const auto clampIt = this->m_context.settings.general.screenClamps.find (screen);
 	    const auto scaling = scalingIt != this->m_context.settings.general.screenScalings.end ()
@@ -1101,21 +1101,38 @@ void WallpaperApplication::loadWallpaper (const std::string& idOrPath) {
 		? clampIt->second
 		: this->m_context.settings.render.window.clamp;
 
-	    if (this->m_renderContext) {
-		this->m_renderContext->setWallpaper (
-		    screen,
-		    WallpaperEngine::Render::CWallpaper::fromWallpaper (
-			*this->m_backgrounds[screen]->wallpaper, *this->m_renderContext, *this->m_audioContext,
-			this->browserContext (), scaling, clamp
-		    )
-		);
+	    // TextureCache resolves assets by walking the app's *committed* backgrounds, so the
+	    // new project must sit in m_backgrounds before the render wallpaper is built. Keep
+	    // the old project on hand and roll it back if the build throws: a failed swap must
+	    // leave the previous wallpaper fully in place (its render side was never replaced,
+	    // since a throw in fromWallpaper means setWallpaper was never entered).
+	    auto previous = std::move (this->m_backgrounds[screen]);
+	    this->m_backgrounds[screen] = std::move (project);
+	    try {
+		if (this->m_renderContext) {
+		    this->m_renderContext->setWallpaper (
+			screen,
+			WallpaperEngine::Render::CWallpaper::fromWallpaper (
+			    *this->m_backgrounds[screen]->wallpaper, *this->m_renderContext, *this->m_audioContext,
+			    this->browserContext (), scaling, clamp
+			)
+		    );
+		}
+	    } catch (...) {
+		this->m_backgrounds[screen] = std::move (previous);
+		throw;
 	    }
 	} catch (const std::exception& e) {
 	    sLog.error ("LoadWallpaper failed for ", screen, ": ", e.what ());
+	    anyFailed = true;
 	}
     }
 
+    if (anyFailed)
+	return false;
+
     this->m_currentWallpaper = idOrPath;
+    return true;
 }
 
 void WallpaperApplication::setProperty (const std::string& key, const std::string& value) {

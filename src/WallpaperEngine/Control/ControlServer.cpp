@@ -179,7 +179,16 @@ void ControlServer::handleMethodCall (
     } else if (method == "LoadWallpaper") {
         const gchar* idOrPath = nullptr;
         g_variant_get (parameters, "(&s)", &idOrPath);
-        target.loadWallpaper (idOrPath != nullptr ? idOrPath : "");
+        if (!target.loadWallpaper (idOrPath != nullptr ? idOrPath : "")) {
+            // The previous wallpaper keeps playing; tell the caller so it can report the failure
+            // instead of believing the swap happened.
+            g_dbus_method_invocation_return_error (
+                invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "cannot load wallpaper '%s'; the previous wallpaper is still playing",
+                idOrPath != nullptr ? idOrPath : ""
+            );
+            return;
+        }
     } else if (method == "SetProperty") {
         const gchar* key = nullptr;
         const gchar* value = nullptr;
