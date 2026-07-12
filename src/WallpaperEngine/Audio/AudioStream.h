@@ -15,6 +15,7 @@ extern "C" {
 #include <SDL_thread.h>
 
 #include "WallpaperEngine/Audio/AudioContext.h"
+#include "WallpaperEngine/Data/Model/DynamicValue.h"
 
 // TODO: FIND A BETTER PLACE TO DO THIS? OLD_API MIGHT EXIST BUT THIS DEFINE MIGHT NOT BE DEFINED...
 #ifndef FF_API_FIFO_OLD_API
@@ -83,6 +84,17 @@ public:
      * @return If the stream is to be repeated at the end or not
      */
     [[nodiscard]] bool isRepeat () const;
+    /**
+     * @param source the sound object's own mix level, 0.0-1.0, multiplied into the global volume.
+     *               Taken as a live value rather than a number because authors bind it to a
+     *               property, so the mix follows the slider. Must outlive the stream (the scene
+     *               owns it). nullptr means "no scene-level attenuation".
+     */
+    void setVolume (const Data::Model::DynamicValue* source);
+    /**
+     * @return This stream's own mix level, 0.0-1.0 (1.0 unless the scene asked for less)
+     */
+    [[nodiscard]] double getVolume () const;
     /**
      * Stops decoding and playback of the stream
      */
@@ -165,6 +177,8 @@ private:
     bool m_initialized = false;
     /** Repeat enabled? */
     bool m_repeat = false;
+    /** This stream's own mix level, 0.0-1.0, owned by the scene's sound object (may be nullptr) */
+    const Data::Model::DynamicValue* m_volume = nullptr;
     /** The codec context that contains the original audio format information */
     AVCodecContext* m_context = nullptr;
     /** The format context that controls how data is read off the file */

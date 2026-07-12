@@ -28,6 +28,10 @@ void CSound::load () {
 	    = new Audio::AudioStream (this->getScene ().getAudioContext (), this->getAssetLocator ().read (cur));
 
 	stream->setRepeat (this->m_sound.playbackmode.has_value () && this->m_sound.playbackmode == "loop");
+	// The scene's own mix level for this object -- an ambience bed is often authored well below
+	// the music it sits under, and mixing every stream at full turns that into two soundtracks.
+	// The scene owns the setting and outlives its streams, so handing over the raw value is safe.
+	stream->setVolume (this->m_sound.volume->value.get ());
 
 	// add the stream to the context so it can be played
 	this->m_audioStreams.insert_or_assign (this->getScene ().getAudioContext ().addStream (stream), stream);

@@ -539,6 +539,11 @@ void ApplicationContext::loadSettingsFromArgv () {
 	.flag ()
 	.action ([this] (const std::string& value) -> void { this->settings.audio.enabled = false; });
 
+    audioGroup.add_argument ("--muted")
+	.help ("Starts muted, but keeps audio loaded so the control interface can unmute it later")
+	.flag ()
+	.action ([this] (const std::string& value) -> void { this->settings.audio.muted = true; });
+
     audioGroup.add_argument ("--noautomute")
 	.help ("Disables the automute when an app is playing sound")
 	.flag ()
@@ -703,8 +708,10 @@ void ApplicationContext::loadSettingsFromArgv () {
 
 	// setup application state
 	this->state.general.keepRunning = true;
-	this->state.audio.enabled = this->settings.audio.enabled;
-	this->state.audio.volume = this->settings.audio.volume;
+	// --muted only seeds the live state (sounds still load, so the control interface can unmute);
+	// --silent clears settings.audio.enabled outright and nothing can bring the audio back.
+	this->state.audio.enabled = this->settings.audio.enabled && !this->settings.audio.muted;
+	this->state.audio.volume = this->settings.audio.muted ? 0 : this->settings.audio.volume;
 	this->state.mouse.enabled = this->settings.mouse.enabled;
 
 #if DEMOMODE

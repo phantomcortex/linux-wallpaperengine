@@ -29,8 +29,16 @@ protected:
     friend class CWallpaper;
 
 private:
+    /**
+     * Reconciles the mpv backend with the live audio state (control interface volume/mute and the
+     * automute detector). Called every frame; only touches mpv when something actually changed.
+     */
+    void updateAudio ();
+
     GLPlayerUniquePtr m_player;
 
     bool m_muted = false;
+    /** Last volume pushed to mpv, in the engine's 0-128 scale; -1 until the first push */
+    int m_appliedVolume = -1;
 };
 } // namespace WallpaperEngine::Render::Wallpapers

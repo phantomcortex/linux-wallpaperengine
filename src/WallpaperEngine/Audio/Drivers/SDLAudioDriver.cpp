@@ -1,5 +1,7 @@
 #include "SDLAudioDriver.h"
 #include "WallpaperEngine/Logging/Log.h"
+#include <algorithm>
+#include <cmath>
 
 #define SDL_AUDIO_BUFFER_SIZE 4096
 #define MAX_AUDIO_FRAME_SIZE 192000
@@ -57,10 +59,15 @@ void audio_callback (void* userdata, uint8_t* streamData, int length) {
 		len1 = streamLength;
 	    }
 
-	    // mix the audio
+	    // mix the audio at the global volume scaled by the sound object's own mix level, so an
+	    // ambience bed authored at 0.27 stays under the music instead of competing with it
+	    const int mixVolume = static_cast<int> (
+		std::lround (driver->getApplicationContext ().state.audio.volume * buffer->stream->getVolume ())
+	    );
+
 	    SDL_MixAudioFormat (
 		streamDataPointer, &buffer->audio_buf[buffer->audio_buf_index], driver->getSpec ().format, len1,
-		driver->getApplicationContext ().state.audio.volume
+		std::max (0, std::min (mixVolume, SDL_MIX_MAXVOLUME))
 	    );
 
 	    streamLength -= len1;

@@ -25,21 +25,43 @@ CVideo::CVideo (
 	this->getContext (), this->CWallpaper::getWallpaperTexture (), videopath, 64, 64,
 	this->CWallpaper::getWallpaperFramebuffer ()
     );
-    // --silent disables audio (audio.enabled = false) and must mute video wallpapers too;
-    // a volume of 0 mutes the mpv backend (matching what --volume 0 already does).
-    const auto& audioSettings = this->getContext ().getApp ().getContext ().settings.audio;
-    this->m_player->setVolume (audioSettings.enabled ? audioSettings.volume * 100.0 / 128.0 : 0.0);
+    // Seed the backend from the *live* state, not from settings: on a LoadWallpaper swap this
+    // object is rebuilt long after the control interface may have changed volume or muted us, and
+    // settings.audio still holds the stale command-line values.
+    this->updateAudio ();
     // make sure the video has at least one usage marked, this ensures the video plays
     this->m_player->incrementUsageCount ();
 }
 
 CVideo::~CVideo () { this->m_player->decrementUsageCount (); }
 
-void CVideo::renderFrame (const glm::ivec4& viewport) {
-    // ensure the video's audio follows audio detection rules
-    if (this->getContext ().getApp ().getContext ().settings.audio.enabled
-	&& this->m_muted != this->getAudioContext ().getDriver ().getAudioDetector ().anythingPlaying ()) {
-	this->m_muted = !this->m_muted;
+void CVideo::updateAudio () {
+    const auto& context = this->getContext ().getApp ().getContext ();
+
+    // --silent (settings.audio.enabled = false) is a hard, process-lifetime kill switch: it also
+    // stops CSound from ever loading, so the control interface cannot meaningfully undo it. Honour
+    // it by keeping mpv silent and never consulting the live state again.
+    if (!context.settings.audio.enabled) {
+	if (this->m_appliedVolume != 0) {
+	    this->m_appliedVolume = 0;
+	    this->m_player->setVolume (0.0);
+	}
+
+	return;
+    }
+
+    // Live volume from the control interface, in the engine's 0-128 scale; mpv wants 0-100.
+    if (context.state.audio.volume != this->m_appliedVolume) {
+	this->m_appliedVolume = context.state.audio.volume;
+	this->m_player->setVolume (this->m_appliedVolume * 100.0 / 128.0);
+    }
+
+    // Mute when the control interface asks for it, or when automute sees another app playing sound.
+    const bool muted = !context.state.audio.enabled
+	|| this->getAudioContext ().getDriver ().getAudioDetector ().anythingPlaying ();
+
+    if (muted != this->m_muted) {
+	this->m_muted = muted;
 
 	if (this->m_muted) {
 	    this->m_player->setMuted ();
@@ -47,6 +69,10 @@ void CVideo::renderFrame (const glm::ivec4& viewport) {
 	    this->m_player->clearMuted ();
 	}
     }
+}
+
+void CVideo::renderFrame (const glm::ivec4& viewport) {
+    this->updateAudio ();
 
     this->m_player->render ();
 }

@@ -162,10 +162,14 @@ public:
 	 * Audio settings
 	 */
 	struct {
-	    /** If the audio system is enabled */
+	    /** If the audio system is enabled. --silent clears this, which stops sounds from ever
+	     * being loaded; it is a process-lifetime kill switch the control interface cannot undo */
 	    bool enabled;
 	    /** Sound volume (0-128) */
 	    int volume;
+	    /** If the wallpaper starts muted. Unlike --silent this is only an initial *state*: sounds
+	     * still load, and the control interface can unmute back to the volume above */
+	    bool muted;
 	    /** If the audio must be muted if something else is playing sound */
 	    bool automute;
 	    /** If audio processing can be enabled or not */
@@ -239,6 +243,7 @@ public:
         .audio = {
             .enabled = true,
             .volume = 15,
+            .muted = false,
             .automute = true,
             .audioprocessing = true,
         },

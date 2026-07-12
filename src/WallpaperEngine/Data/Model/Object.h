@@ -137,6 +137,17 @@ struct SoundData {
     // TODO: WRITE AN ENUM FOR THIS
     std::optional<std::string> playbackmode;
     std::vector<std::string> sounds;
+    /**
+     * Per-object mix level, 0.0-1.0, multiplied into the global volume. Authors use this to sit an
+     * ambience bed *under* a music track (a forest ambience at 0.27 behind a song at 1.0); ignoring
+     * it plays both at full and sounds like two competing soundtracks.
+     *
+     * A UserSetting, not a plain number: authors routinely bind it to a property they expose
+     * ({"user": "musicvolume", "value": 0.8}), so reading it as a raw double throws on a good third
+     * of the sound objects in the wild -- and taking it as a setting means the mix follows the
+     * property live.
+     */
+    UserSettingUniquePtr volume;
 };
 
 class Sound : public Object, public SoundData {

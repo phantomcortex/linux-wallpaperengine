@@ -1,5 +1,6 @@
 #include "AudioStream.h"
 #include "WallpaperEngine/Logging/Log.h"
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -413,6 +414,18 @@ bool AudioStream::isInitialized () const { return this->m_initialized; }
 void AudioStream::setRepeat (const bool newRepeat) { this->m_repeat = newRepeat; }
 
 bool AudioStream::isRepeat () const { return this->m_repeat; }
+
+void AudioStream::setVolume (const Data::Model::DynamicValue* source) { this->m_volume = source; }
+
+double AudioStream::getVolume () const {
+    if (this->m_volume == nullptr) {
+	return 1.0;
+    }
+
+    // Resolved on every mix so a property change reaches the audio without a scene reload. getFloat
+    // is safe whatever the underlying type: every DynamicValue::update cross-fills the float.
+    return std::max (0.0, std::min (static_cast<double> (this->m_volume->getFloat ()), 1.0));
+}
 
 ReadStreamSharedPtr& AudioStream::getBuffer () { return this->m_buffer; }
 

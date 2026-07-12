@@ -80,8 +80,11 @@ void WallpaperApplication::initializeSubsystems () {
     // initialize player dbus (update every 2 seconds)
     m_mediaSource = std::make_unique<WallpaperEngine::Media::DBusMediaSource> (std::chrono::milliseconds (2000));
 
-    // seed control-interface state from the initial settings
-    this->m_desiredVolume = this->m_context.state.audio.volume;
+    // Seed control-interface state from the initial settings. The volume must come from *settings*,
+    // not from state: --muted zeroes state.audio.volume, and seeding from that would make a later
+    // SetMuted(false) "unmute" to silence.
+    this->m_desiredVolume = this->m_context.settings.audio.volume;
+    this->m_muted = this->m_context.settings.audio.muted;
     this->m_fpsTimeRef = std::chrono::steady_clock::now ();
 
 #ifdef ENABLE_CONTROL_DBUS
