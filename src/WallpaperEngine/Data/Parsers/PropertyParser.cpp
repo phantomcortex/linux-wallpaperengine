@@ -67,7 +67,37 @@ PropertySharedPtr PropertyParser::parseCombo (const JSON& it, const std::string&
 	);
     }
 
-    const auto value = it.require ("value", "Combo property must have a value");
+    // Authors omit "value" (or point it at something not in the options) often enough that either
+    // must not cost the wallpaper: fall back to the first authored option instead of throwing.
+    std::string selected {};
+    const auto value = it.optional ("value");
+
+    if (value.has_value ()) {
+	selected = value->is_number () ? std::to_string (value->get<int> ()) : value->get<std::string> ();
+    }
+
+    if (selected.empty () || !optionsMap.contains (selected)) {
+	std::string fallback {};
+	for (const auto& cur : options) {
+	    // first entry in *author* order -- optionsMap is sorted by value and loses it
+	    if (!cur.is_object ()) {
+		continue;
+	    }
+	    const auto optionValue = cur.require ("value", "Combo option must have a value");
+	    fallback = optionValue.is_number () ? std::to_string (optionValue.get<int> ())
+						: optionValue.get<std::string> ();
+	    break;
+	}
+
+	if (fallback.empty ()) {
+	    sLog.exception ("Combo property has no usable value or options. Contents: ", it.dump ());
+	}
+
+	sLog.error ("Combo property \"", name, "\" has ",
+		    selected.empty () ? "no value" : "a value not present in its options",
+		    "; defaulting to the first option. Contents: ", it.dump ());
+	selected = fallback;
+    }
 
     return std::make_shared<PropertyCombo> (
 	PropertyData {
@@ -75,7 +105,7 @@ PropertySharedPtr PropertyParser::parseCombo (const JSON& it, const std::string&
 	    .text = it.optional<std::string> ("text", ""),
 	},
 	ComboData { .values = optionsMap },
-	value.is_number () ? std::to_string (value.get<int> ()) : value.get<std::string> ()
+	selected
     );
 }
 

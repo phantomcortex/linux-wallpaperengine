@@ -6,7 +6,9 @@
 #include <glm/detail/type_vec1.hpp>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "WallpaperEngine/Data/Builders/UserSettingBuilder.h"
@@ -35,6 +37,33 @@ using JSON = nlohmann::basic_json<
 class JsonExtensions {
 public:
     using base_type = JSON;
+
+    /**
+     * Wallpaper authors frequently quote scalar values ("50" where 50 is meant, "true" for a
+     * bool). When T is arithmetic and the JSON value is such a string, parse it; otherwise
+     * return nullopt so the caller falls through to nlohmann's own conversion. Throws
+     * std::invalid_argument on a string that does not parse as a number.
+     */
+    template <typename T>
+    [[nodiscard]] static std::optional<T> fromQuotedNumber (const base_type& value) {
+	if constexpr (std::is_arithmetic_v<T>) {
+	    if (value.is_string ()) {
+		const auto& str = value.template get_ref<const std::string&> ();
+
+		if constexpr (std::is_same_v<T, bool>) {
+		    if (str == "true" || str == "1")
+			return true;
+		    if (str == "false" || str == "0")
+			return false;
+		    throw std::invalid_argument ("not a boolean: " + str);
+		} else {
+		    return static_cast<T> (std::stod (str));
+		}
+	    }
+	}
+
+	return std::nullopt;
+    }
 
     template <typename T, typename std::enable_if_t<is_glm_vec<T>::value, int> = 0> [[nodiscard]] T get () const {
 	constexpr int length = GlmVecTraits<T>::length;
@@ -66,6 +95,10 @@ public:
 	    sLog.exception (message, ". Contents: ", base.dump ());
 	}
 
+	if (const auto quoted = fromQuotedNumber<T> (*it); quoted.has_value ()) {
+	    return *quoted;
+	}
+
 	return (*it);
     }
     [[nodiscard]] std::optional<base_type> optional (const std::string& key) const noexcept {
@@ -79,6 +112,10 @@ public:
 
 	return result;
     }
+    // NOTE: these are noexcept, so the nlohmann conversion (which throws type_error on a
+    // mistyped field) must never escape -- a throw through noexcept is std::terminate, and a
+    // single sloppy field in one scene would kill the whole process. Authors also quote numbers
+    // ("50" for 50) often enough that arithmetic targets accept numeric strings.
     template <typename T> [[nodiscard]] std::optional<T> optional (const std::string& key) const noexcept {
 	auto base = this->base ();
 	const auto it = base.find (key);
@@ -87,7 +124,16 @@ public:
 	    return std::nullopt;
 	}
 
-	return *it;
+	try {
+	    if (const auto quoted = fromQuotedNumber<T> (*it); quoted.has_value ()) {
+		return *quoted;
+	    }
+
+	    return *it;
+	} catch (const std::exception& ex) {
+	    sLog.error ("Ignoring value with unexpected type for key \"", key, "\": ", it->dump ());
+	    return std::nullopt;
+	}
     }
     template <typename T> [[nodiscard]] T optional (const std::string& key, T defaultValue) const noexcept {
 	auto base = this->base ();
@@ -97,7 +143,16 @@ public:
 	    return defaultValue;
 	}
 
-	return (*it);
+	try {
+	    if (const auto quoted = fromQuotedNumber<T> (*it); quoted.has_value ()) {
+		return *quoted;
+	    }
+
+	    return (*it);
+	} catch (const std::exception& ex) {
+	    sLog.error ("Using the default for key \"", key, "\" with unexpected type: ", it->dump ());
+	    return defaultValue;
+	}
     }
     [[nodiscard]] UserSettingUniquePtr user (const std::string& key, const Properties& properties) const;
     template <typename T>

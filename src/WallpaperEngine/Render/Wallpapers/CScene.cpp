@@ -232,24 +232,38 @@ Render::CObject* CScene::createObject (const Object& object) {
 Render::CObject* CScene::dispatchObjectType (const Object& object) {
     Render::CObject* renderObject = nullptr;
 
-    if (object.is<Image> ()) {
-	renderObject = new Objects::CImage (*this, *object.as<Image> ());
-    } else if (object.is<Sound> ()) {
-	renderObject = new Objects::CSound (*this, *object.as<Sound> ());
-    } else if (object.is<Text> ()) {
-	renderObject = new Objects::CText (*this, *object.as<Text> ());
-    } else if (object.is<Particle> ()) {
-	const auto& particleData = *object.as<Particle> ();
+    // One broken object must cost only itself, never the scene: the constructors below chase
+    // parsed data (materials, textures, shaders) that is allowed to be missing or malformed.
+    try {
+	if (object.is<Image> ()) {
+	    renderObject = new Objects::CImage (*this, *object.as<Image> ());
+	} else if (object.is<Sound> ()) {
+	    renderObject = new Objects::CSound (*this, *object.as<Sound> ());
+	} else if (object.is<Text> ()) {
+	    renderObject = new Objects::CText (*this, *object.as<Text> ());
+	} else if (object.is<Particle> ()) {
+	    const auto& particleData = *object.as<Particle> ();
 
-	if (this->getContext ().getApp ().getContext ().settings.general.disableParticles == true) {
-	    sLog.debug ("Ignoring particle system (disabled in settings): ", particleData.name);
-	    return nullptr;
+	    if (this->getContext ().getApp ().getContext ().settings.general.disableParticles == true) {
+		sLog.debug ("Ignoring particle system (disabled in settings): ", particleData.name);
+		return nullptr;
+	    }
+
+	    // the parser leaves material null when the particle declares none or its load failed;
+	    // CParticle dereferences it unconditionally, so skip the system instead of faulting
+	    if (particleData.material == nullptr || particleData.material->material == nullptr) {
+		sLog.error ("Ignoring particle system without a usable material: ", particleData.name);
+		return nullptr;
+	    }
+
+	    renderObject = new Objects::CParticle (*this, particleData);
+	} else {
+	    sLog.error ("Unknown object type, creating placeholder, empty object: ", object.id);
+	    renderObject = new CObject (*this, object);
 	}
-
-	renderObject = new Objects::CParticle (*this, particleData);
-    } else {
-	sLog.error ("Unknown object type, creating placeholder, empty object: ", object.id);
-	renderObject = new CObject (*this, object);
+    } catch (const std::exception& e) {
+	sLog.error ("Failed to create object ", object.id, ": ", e.what ());
+	return nullptr;
     }
 
     try {
