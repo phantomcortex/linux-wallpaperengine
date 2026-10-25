@@ -1,6 +1,13 @@
 #include "ControlServer.h"
 #include "WallpaperEngine/Logging/Log.h"
 
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
+#include <initializer_list>
+#include <utility>
+
 using namespace WallpaperEngine::Control;
 
 namespace {
@@ -30,6 +37,83 @@ constexpr const char* INTROSPECTION_XML = R"XML(
   </interface>
 </node>
 )XML";
+
+// Structured logging for the control path (objectives Q5). Each record is one line:
+//   [wallpaperengine] {"ts":"...","level":"info","src":"engine","event":"...",...}
+// the same tag and envelope the GNOME Shell extension writes, so one grep over the journal
+// interleaves both sides. Values are pre-rendered JSON (jstr/jnum) so callers pick the type.
+using Field = std::pair<const char*, std::string>;
+
+// Per-call tracing (every method, with arguments and timing) and the periodic heartbeat are off
+// unless the launcher sets WPE_VERBOSE; lifecycle events and every failure are always logged.
+bool verbose () {
+    static const bool enabled = [] {
+    const char* value = std::getenv ("WPE_VERBOSE");
+    return value != nullptr && *value != '\0' && std::string (value) != "0";
+    }();
+    return enabled;
+}
+
+std::string timestamp () {
+    const auto now = std::chrono::system_clock::now ();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds> (now.time_since_epoch ()).count ();
+    const std::time_t seconds = static_cast<std::time_t> (ms / 1000);
+    std::tm utc {};
+    gmtime_r (&seconds, &utc);
+    char buffer[80];
+    std::snprintf (
+        buffer, sizeof (buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", utc.tm_year + 1900, utc.tm_mon + 1,
+        utc.tm_mday, utc.tm_hour, utc.tm_min, utc.tm_sec, static_cast<int> (ms % 1000)
+    );
+    return buffer;
+}
+
+std::string jstr (const std::string& value) {
+    std::string out = "\"";
+    for (const unsigned char c : value) {
+    switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+        if (c < 0x20) {
+            char escape[8];
+            std::snprintf (escape, sizeof (escape), "\\u%04x", c);
+            out += escape;
+        } else {
+            out += static_cast<char> (c);
+        }
+    }
+    }
+    return out + "\"";
+}
+
+std::string jnum (long long value) { return std::to_string (value); }
+
+void logEvent (const char* level, const char* event, std::initializer_list<Field> fields) {
+    std::string line = "[wallpaperengine] {\"ts\":" + jstr (timestamp ()) + ",\"level\":" + jstr (level)
+    + ",\"src\":\"engine\",\"event\":" + jstr (event);
+    for (const auto& [key, value] : fields) {
+    line += ",\"";
+    line += key;
+    line += "\":" + value;
+    }
+    line += "}";
+
+    // warnings and errors go to the error streams so they stay separable from the chatter
+    if (std::string (level) == "info" || std::string (level) == "debug") {
+    sLog.out (line);
+    } else {
+    sLog.error (line);
+    }
+}
+
+long long elapsedMs (std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration_cast<std::chrono::milliseconds> (std::chrono::steady_clock::now () - since)
+    .count ();
+}
 
 const char* stateToString (PlaybackState state) {
     switch (state) {
@@ -97,7 +181,7 @@ ControlServer::ControlServer (int fd, ControlTarget& target) : m_target (target)
         sLog.exception ("Control interface: cannot register object: ", message);
     }
 
-    sLog.out ("Control interface ready on fd ", fd);
+    logEvent ("info", "control-ready", { { "fd", jnum (fd) }, { "verbose", verbose () ? "true" : "false" } });
 }
 
 ControlServer::~ControlServer () {
@@ -129,9 +213,26 @@ void ControlServer::publishState () {
     const bool stateChanged = state != this->m_lastState;
     const bool wallpaperChanged = wallpaper != this->m_lastWallpaper;
 
+    // The render loop is what calls us, so this doubles as a liveness signal: a heartbeat that
+    // stops appearing means the loop stopped, which is the first thing to know when a wallpaper
+    // freezes. Every 10s, verbose only.
+    if (verbose () && std::chrono::steady_clock::now () - this->m_lastHeartbeat >= std::chrono::seconds (10)) {
+        this->m_lastHeartbeat = std::chrono::steady_clock::now ();
+        logEvent ("debug", "heartbeat", {
+            { "state", jstr (stateToString (state)) },
+            { "wallpaper", jstr (wallpaper) },
+            { "fps", jnum (this->m_target.fps ()) },
+        });
+    }
+
     if (!stateChanged && !wallpaperChanged) {
         return;
     }
+
+    logEvent ("info", "state-changed", {
+        { "state", jstr (stateToString (state)) },
+        { "wallpaper", jstr (wallpaper) },
+    });
 
     GVariantBuilder changed;
     g_variant_builder_init (&changed, G_VARIANT_TYPE ("a{sv}"));
@@ -162,6 +263,20 @@ void ControlServer::handleMethodCall (
     ControlTarget& target = self->m_target;
     const std::string method = methodName;
 
+    const auto started = std::chrono::steady_clock::now ();
+    gchar* printed = parameters != nullptr ? g_variant_print (parameters, FALSE) : nullptr;
+    const std::string args = printed != nullptr ? printed : "()";
+    g_free (printed);
+
+    // A scene swap is the one call that can take seconds and the one that fails in the field, so it
+    // is always logged; the rest (SetMousePosition can arrive every frame) only when verbose.
+    const bool isLoad = method == "LoadWallpaper";
+    if (verbose ()) {
+        logEvent ("debug", "control-call", { { "method", jstr (method) }, { "args", jstr (args) } });
+    } else if (isLoad) {
+        logEvent ("info", "load-begin", { { "args", jstr (args) } });
+    }
+
     if (method == "Pause") {
         target.pause ();
     } else if (method == "Resume") {
@@ -180,6 +295,11 @@ void ControlServer::handleMethodCall (
         const gchar* idOrPath = nullptr;
         g_variant_get (parameters, "(&s)", &idOrPath);
         if (!target.loadWallpaper (idOrPath != nullptr ? idOrPath : "")) {
+            logEvent ("warn", "load-failed", {
+                { "wallpaper", jstr (idOrPath != nullptr ? idOrPath : "") },
+                { "ms", jnum (elapsedMs (started)) },
+                { "note", jstr ("previous wallpaper still playing") },
+            });
             // The previous wallpaper keeps playing; tell the caller so it can report the failure
             // instead of believing the swap happened.
             g_dbus_method_invocation_return_error (
@@ -200,10 +320,17 @@ void ControlServer::handleMethodCall (
         g_variant_get (parameters, "(dd)", &x, &y);
         target.setMousePosition (x, y);
     } else {
+        logEvent ("warn", "control-unknown-method", { { "method", jstr (method) } });
         g_dbus_method_invocation_return_error_literal (
             invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD, "Unknown method"
         );
         return;
+    }
+
+    if (isLoad) {
+        logEvent ("info", "load-done", { { "args", jstr (args) }, { "ms", jnum (elapsedMs (started)) } });
+    } else if (verbose ()) {
+        logEvent ("debug", "control-reply", { { "method", jstr (method) }, { "ms", jnum (elapsedMs (started)) } });
     }
 
     g_dbus_method_invocation_return_value (invocation, nullptr);

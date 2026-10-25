@@ -2,6 +2,7 @@
 
 #include "ControlTarget.h"
 
+#include <chrono>
 #include <gio/gio.h>
 #include <string>
 
@@ -49,5 +50,8 @@ private:
     // last values published via PropertiesChanged, for change detection
     PlaybackState m_lastState = PlaybackState::Stopped;
     std::string m_lastWallpaper;
+
+    // when the verbose heartbeat last fired (see publishState)
+    std::chrono::steady_clock::time_point m_lastHeartbeat = std::chrono::steady_clock::now ();
 };
 } // namespace WallpaperEngine::Control
